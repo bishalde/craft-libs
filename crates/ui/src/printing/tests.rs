@@ -1,7 +1,37 @@
 use super::*;
 
 fn queue(name: &str, default: bool) -> Printer {
-    Printer { name: name.into(), default }
+    Printer { name: name.into(), label: String::new(), default }
+}
+
+fn labelled(name: &str, label: &str) -> Printer {
+    Printer { name: name.into(), label: label.into(), default: false }
+}
+
+#[test]
+fn the_dialog_shows_a_printers_label_and_keeps_its_queue_name() {
+    // CUPS can't put dots in a queue name: the printer added as 192.0.2.15 is `_192_0_2_15`.
+    let printers = [labelled("_192_0_2_15", "192.0.2.15"), queue("Plain_Queue", false), labelled("Blank", "  ")];
+    assert_eq!(shown_names(&printers), ["192.0.2.15", "Plain_Queue", "Blank"], "the label, else the name");
+    // Two printers described alike stay apart by their queue names; a unique label stays bare.
+    let printers = [labelled("Office_1", "Office"), labelled("Office_2", "Office"), labelled("Lab", "Lab printer")];
+    assert_eq!(shown_names(&printers), ["Office (Office_1)", "Office (Office_2)", "Lab printer"]);
+    // A label that is another queue's name doesn't pass for that queue.
+    assert_eq!(shown_names(&[queue("Office", false), labelled("Office_2", "Office")]), ["Office", "Office (Office_2)"]);
+    assert!(shown_names(&[]).is_empty());
+
+    // Choosing still selects the queue: jobs go to the name, not the label.
+    let ctx = egui::Context::default();
+    let mut state = State::default();
+    let discover: Discover = Box::new(|| {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender.send(vec![Printer { name: "_192_0_2_15".into(), label: "192.0.2.15".into(), default: true }]).unwrap();
+        receiver
+    });
+    assert!(state.refresh(&discover));
+    state.poll(&ctx);
+    assert_eq!(state.settings.printer, "_192_0_2_15");
+    assert!(state.ready());
 }
 
 #[test]

@@ -5,8 +5,27 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Printer {
+    /// The spooler's destination: what [`Settings::printer`] and jobs name.
     pub name: String,
+    /// What the dialog shows; empty shows `name`. CUPS, for one, describes the queue
+    /// `_192_0_2_15` as `192.0.2.15`, the name the user gave the printer.
+    pub label: String,
     pub default: bool,
+}
+
+/// The text the dialog shows for each of `printers`, in order: its label, or its name when it has
+/// none. Text two printers would share is followed by the name in brackets, so neither hides the
+/// other.
+pub fn shown_names(printers: &[Printer]) -> Vec<String> {
+    let base: Vec<&str> = printers.iter().map(|p| if p.label.trim().is_empty() { p.name.as_str() } else { p.label.as_str() }).collect();
+    printers
+        .iter()
+        .zip(&base)
+        .map(|(printer, text)| {
+            let shared = base.iter().filter(|other| *other == text).count() > 1;
+            if shared && *text != printer.name { format!("{text} ({})", printer.name) } else { (*text).to_owned() }
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,13 +179,15 @@ impl State {
             ui.add_enabled_ui(!self.busy(), |ui| {
                 let width = ui.available_width().clamp(32.0, 230.0);
                 let printer_label = ui.label(labels.printer);
+                let shown = shown_names(&self.printers);
+                let selected = self.printers.iter().zip(&shown).find(|(p, _)| p.name == self.settings.printer).map(|(_, text)| text.as_str());
                 egui::ComboBox::from_id_salt("printer")
                     .width(width)
                     .wrap_mode(egui::TextWrapMode::Truncate)
-                    .selected_text(if self.settings.printer.is_empty() { labels.select_printer } else { &self.settings.printer })
+                    .selected_text(if self.settings.printer.is_empty() { labels.select_printer } else { selected.unwrap_or(&self.settings.printer) })
                     .show_ui(ui, |ui| {
-                        for printer in &self.printers {
-                            ui.selectable_value(&mut self.settings.printer, printer.name.clone(), &printer.name);
+                        for (printer, text) in self.printers.iter().zip(&shown) {
+                            ui.selectable_value(&mut self.settings.printer, printer.name.clone(), text);
                         }
                     })
                     .response

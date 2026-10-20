@@ -42,7 +42,12 @@ impl std::error::Error for Error {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Printer {
+    /// The destination `lp -d` and the spooler know the printer by.
     pub name: String,
+    /// The printer's human name (CUPS `printer-info`), empty when the spooler gives none. A CUPS
+    /// queue name can't hold dots or spaces, so a printer added as `192.0.2.15` is the queue
+    /// `_192_0_2_15` described as `192.0.2.15`. Windows names are already human: empty there.
+    pub description: String,
     pub default: bool,
     /// Whether the Windows driver reports duplex support; None when unknown (CUPS).
     pub two_sided: Option<bool>,
@@ -103,14 +108,26 @@ fn default_destination(out: &str) -> Option<&str> {
     out.lines().find_map(|l| l.strip_prefix("system default destination:")).map(str::trim)
 }
 
-/// Parse `lpstat -p -d` output.
+/// The longest description kept, in characters: a dialog shows a name, not a paragraph.
+const MAX_DESCRIPTION: usize = 256;
+
+/// Parse `lpstat -p -d` output, or `lpstat -l -p -d`, whose indented `Description:` line under a
+/// queue becomes its [`Printer::description`].
 pub fn parse_lpstat(out: &str) -> Vec<Printer> {
     let default = default_destination(out);
-    out.lines()
-        .filter_map(|l| l.strip_prefix("printer "))
-        .filter_map(|l| l.split_whitespace().next())
-        .map(|n| Printer { name: n.to_string(), default: default == Some(n), two_sided: None })
-        .collect()
+    let mut printers: Vec<Printer> = Vec::new();
+    for line in out.lines() {
+        if let Some(name) = line.strip_prefix("printer ").and_then(|l| l.split_whitespace().next()) {
+            printers.push(Printer { name: name.to_string(), description: String::new(), default: default == Some(name), two_sided: None });
+        } else if line.starts_with(char::is_whitespace) {
+            // Only a queue's own detail lines are indented; the first description wins.
+            let Some(description) = line.trim_start().strip_prefix("Description:") else { continue };
+            if let Some(printer) = printers.last_mut().filter(|p| p.description.is_empty()) {
+                printer.description = description.trim().chars().take(MAX_DESCRIPTION).collect();
+            }
+        }
+    }
+    printers
 }
 
 /// Parse `lpstat -e` output: destination names, one per line.
@@ -345,9 +362,9 @@ fn lpstat_with(args: &[&str]) -> std::process::Command {
     c
 }
 
-/// `lpstat -p -d`: the spooler's queues and the default destination.
+/// `lpstat -l -p -d`: the spooler's queues with their descriptions, and the default destination.
 pub fn lpstat_command() -> std::process::Command {
-    lpstat_with(&["-p", "-d"])
+    lpstat_with(&["-l", "-p", "-d"])
 }
 
 /// `lpstat -e`: every destination CUPS can print to, including driverless network printers no
@@ -394,7 +411,7 @@ pub fn printers_parsed(queues: &str, available: Option<&str>) -> Vec<Printer> {
     if let Some(names) = available {
         for name in parse_lpstat_e(names) {
             if !printers.iter().any(|p| p.name == name) {
-                printers.push(Printer { default: default == Some(name.as_str()), name, two_sided: None });
+                printers.push(Printer { default: default == Some(name.as_str()), name, description: String::new(), two_sided: None });
             }
         }
     }
@@ -409,7 +426,10 @@ pub(crate) fn printer_list(queues: impl IntoIterator<Item = (String, Option<bool
     let mut queues: Vec<(String, Option<bool>)> = queues.into_iter().filter(|(n, _)| !n.trim().is_empty()).collect();
     queues.sort_by(|a, b| a.0.cmp(&b.0));
     queues.dedup_by(|a, b| a.0 == b.0);
-    queues.into_iter().map(|(name, two_sided)| Printer { default: default == Some(name.as_str()), name, two_sided }).collect()
+    queues
+        .into_iter()
+        .map(|(name, two_sided)| Printer { default: default == Some(name.as_str()), name, description: String::new(), two_sided })
+        .collect()
 }
 
 /// A printer list in the text form craft-print's former PowerShell backend printed: one per line,
@@ -428,8 +448,8 @@ pub fn parse_windows_printers(out: &str) -> Vec<Printer> {
                 _ => (l, None),
             };
             match l.strip_prefix('*') {
-                Some(name) => Printer { name: name.to_string(), default: true, two_sided },
-                None => Printer { name: l.to_string(), default: false, two_sided },
+                Some(name) => Printer { name: name.to_string(), description: String::new(), default: true, two_sided },
+                None => Printer { name: l.to_string(), description: String::new(), default: false, two_sided },
             }
         })
         .collect();
