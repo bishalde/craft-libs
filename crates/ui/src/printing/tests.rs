@@ -18,6 +18,10 @@ fn the_dialog_shows_a_printers_label_and_keeps_its_queue_name() {
     assert_eq!(shown_names(&printers), ["Office (Office_1)", "Office (Office_2)", "Lab printer"]);
     // A label that is another queue's name doesn't pass for that queue.
     assert_eq!(shown_names(&[queue("Office", false), labelled("Office_2", "Office")]), ["Office", "Office (Office_2)"]);
+    // A label that is another printer's bracketed text doesn't make two entries read alike: the
+    // printers whose text is still shared show their queue names.
+    let printers = [labelled("Office_1", "Office"), labelled("Office_2", "Office"), labelled("Office_3", "Office (Office_1)")];
+    assert_eq!(shown_names(&printers), ["Office_1", "Office (Office_2)", "Office_3"]);
     assert!(shown_names(&[]).is_empty());
 
     // Choosing still selects the queue: jobs go to the name, not the label.

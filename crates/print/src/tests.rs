@@ -61,6 +61,8 @@ fn a_queue_keeps_its_human_name() {
     );
     // A description before any queue belongs to none, and a huge one is cut to a name's length.
     assert!(parse_lpstat("\tDescription: orphan\n").is_empty());
+    // An empty first description is still the first: a later one doesn't replace it.
+    assert_eq!(parse_lpstat("printer Q is idle.\n\tDescription:\n\tDescription: Office\n")[0].description, "");
     let long = format!("printer Q is idle.\n\tDescription: {}\n", "é".repeat(10_000));
     assert_eq!(parse_lpstat(&long)[0].description.chars().count(), 256);
     // The queues come from `lpstat -l`, so the descriptions are there to read.

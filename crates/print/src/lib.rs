@@ -116,14 +116,18 @@ const MAX_DESCRIPTION: usize = 256;
 pub fn parse_lpstat(out: &str) -> Vec<Printer> {
     let default = default_destination(out);
     let mut printers: Vec<Printer> = Vec::new();
+    // Whether the last queue has had its Description line, even an empty one.
+    let mut described = false;
     for line in out.lines() {
         if let Some(name) = line.strip_prefix("printer ").and_then(|l| l.split_whitespace().next()) {
             printers.push(Printer { name: name.to_string(), description: String::new(), default: default == Some(name), two_sided: None });
-        } else if line.starts_with(char::is_whitespace) {
+            described = false;
+        } else if line.starts_with(char::is_whitespace) && !described {
             // Only a queue's own detail lines are indented; the first description wins.
             let Some(description) = line.trim_start().strip_prefix("Description:") else { continue };
-            if let Some(printer) = printers.last_mut().filter(|p| p.description.is_empty()) {
+            if let Some(printer) = printers.last_mut() {
                 printer.description = description.trim().chars().take(MAX_DESCRIPTION).collect();
+                described = true;
             }
         }
     }

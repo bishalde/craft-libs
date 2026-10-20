@@ -15,17 +15,33 @@ pub struct Printer {
 
 /// The text the dialog shows for each of `printers`, in order: its label, or its name when it has
 /// none. Text two printers would share is followed by the name in brackets, so neither hides the
-/// other.
+/// other; when even that text is shared (another printer's label is `Office (Office_1)`), those
+/// printers show their names, which the spooler keeps distinct.
 pub fn shown_names(printers: &[Printer]) -> Vec<String> {
     let base: Vec<&str> = printers.iter().map(|p| if p.label.trim().is_empty() { p.name.as_str() } else { p.label.as_str() }).collect();
-    printers
+    let mut shown: Vec<String> = printers
         .iter()
         .zip(&base)
         .map(|(printer, text)| {
             let shared = base.iter().filter(|other| *other == text).count() > 1;
             if shared && *text != printer.name { format!("{text} ({})", printer.name) } else { (*text).to_owned() }
         })
-        .collect()
+        .collect();
+    // Each pass turns at least one shared text into its name, or stops: at most one per printer.
+    for _ in 0..printers.len() {
+        let shared: Vec<bool> = shown.iter().map(|text| shown.iter().filter(|other| *other == text).count() > 1).collect();
+        let mut changed = false;
+        for ((text, printer), shared) in shown.iter_mut().zip(printers).zip(shared) {
+            if shared && *text != printer.name {
+                text.clone_from(&printer.name);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    shown
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
